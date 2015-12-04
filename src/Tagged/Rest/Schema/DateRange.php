@@ -12,6 +12,7 @@ class DateRange extends Schema{
                 "start"=> DateTime::build(),
                 "end"=> DateTime::build(),
             ),
+            "required"=>array("start","end")
         );
     }
 

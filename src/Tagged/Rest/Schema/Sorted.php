@@ -1,4 +1,6 @@
 <?php
+namespace Tagged\Rest\Schema;
+use Tagged\Rest\Schema;
 
 class Sorted extends Schema {
     function __construct(array $config){
@@ -8,27 +10,36 @@ class Sorted extends Schema {
         else{
             $default = $config['types'][0];
         }
-        $this->_schema = array(
-            "type"=> "object",
-            "description"=> "Specify the sort type and direction.",
-            "additionalProperties"=>false,
-            "properties"=> array(
-                "fields"=> array(
-                    "enum"=>$config['types'],
-                    "description"=> "The field(s) to sort on.",
-                    "default"=> $default,
-                    "minimum"=> 1,
-                    "maximum"=> 100
+
+        $props = array(
+            "type"=> array(
+                "enum"=>$config['types'],
+                "description"=> "How to sort the data",
+                "default"=> $default,
+            ),
+            "order"=> array(
+                "enum"=>array(
+                    "asc",
+                    "desc"
                 ),
-                "order"=> array(
-                    "enum"=>array(
-                        "asc",
-                        "desc"
-                    ),
-                    "description"=>"Choose a direction to sort",
-                    "default"=>"asc"
-                )
+                "description"=>"Choose a direction to sort",
+                "default"=>"asc"
             )
+        );
+
+        $this->_schema = array(
+            "type"=> array(
+                        "object",
+                        "array"
+            ),
+            "items"=>array(
+                "type"=>"object",
+                "description"=>"A sort specification",
+                "properties"=>$props
+            ),
+            "description"=> "Specify the sort type and direction. This can be a single sort specification, or an array of them",
+            "additionalProperties"=>false,
+            "properties"=> $props
         );
     }
 }

@@ -17,6 +17,22 @@ class Router {
     private $devMode;
     private $captureMode;
 
+    // default mapping for resource routes
+    protected static $resourceMapping = array(
+        'fetch' => 'GET',
+        'update' => 'PUT',
+        'delete' => 'DELETE',
+    );
+
+    // default mapping for collection routes
+    protected static $collectionMapping = array(
+        'index' => 'GET',
+        'find' => 'GET',
+        'create' => 'POST',
+        'bulkUpdate' => 'PUT',
+        'deleteAll' => 'DELETE',
+    );
+
     public function __construct($urlRoot, $routes, $controllerBasePath, $controllerNamespace) {
         $this->routes = $this->flattenRoutes($routes);
         $this->urlRoot = $urlRoot;
@@ -26,6 +42,28 @@ class Router {
         $this->klein = new \Klein\Klein();
         $this->devMode = false;
         $this->sendOutput();
+    }
+
+    /*
+     * Get a full mapping of all methods and http actions
+     */
+    public static function methodMapping() {
+        return array_merge(
+            static::$resourceMapping,
+            static::$collectionMapping
+        );
+    }
+
+    public static function isApiMethod($method) {
+        return in_array($method, static::methodMapping());
+    }
+
+    public static function getResourceMapping() {
+        return static::$resourceMapping;
+    }
+
+    public static function getCollectionMapping() {
+        return static::$collectionMapping;
     }
 
     public function getRoutes() {
@@ -114,8 +152,7 @@ MSG
     /**
      * Return a live object that is the controller class
      */
-    public function loadController($controller) {
-        $class = $this->getControllerClass($controller);
+    public function loadController($class) {
         return $class::api();
     }
 
@@ -166,29 +203,23 @@ MSG
      * Would call the message search() on the messages controller
      */
     public function routeCollection($route, $controller) {
-        list($controller, $method) = $this->parseControllerCallback($controller);
+        list($controller, $customAction) = $this->parseControllerCallback($controller);
 
-        $controller = $this->loadController($controller);
-
-        if ($method == null) {
-            $methods = $controller->getCollectionMethods();
-
-            foreach($methods as $method) {
-                $httpAction = $controller->actionFor($method);
-
+        if ($customAction == null) {
+            foreach($this->getCollectionMapping() as $action=>$httpMethod) {
                 $mappedRoute = $this->makeRoute(
                     $route,
-                    $httpAction,
-                    $controller,
-                    $method
+                    $httpMethod,
+                    $this->getControllerClass($controller),
+                    $action
                 );
             }
         } else {
             $mappedRoute = $this->makeRoute(
                 $route,
                 'POST',
-                $controller,
-                $method
+                $this->getControllerClass($controller),
+                $customAction
             );
         }
     }
@@ -202,29 +233,23 @@ MSG
      * HTTP DELETE: controller->delete()
      */
     public function routeResource($route, $controller) {
-        list($controller, $method) = $this->parseControllerCallback($controller);
+        list($controller, $customAction) = $this->parseControllerCallback($controller);
 
-        $controller = $this->loadController($controller);
-
-        if ($method == null) {
-            $methods = $controller->getResourceMethods();
-
-            foreach($methods as $method) {
-                $httpAction = $controller->actionFor($method);
-
+        if ($customAction == null) {
+            foreach($this->getResourceMapping() as $action=>$httpMethod) {
                 $mappedRoute = $this->makeRoute(
                     $route,
-                    $httpAction,
-                    $controller,
-                    $method
+                    $httpMethod,
+                    $this->getControllerClass($controller),
+                    $action
                 );
             }
         } else {
             $mappedRoute = $this->makeRoute(
                 $route,
                 'POST',
-                $controller,
-                $method
+                $this->getControllerClass($controller),
+                $customAction
             );
         }
     }
@@ -238,10 +263,11 @@ MSG
      * $controller the relative path/name of controller to load
      * $action the method to call on the controller
      */
-    public function makeRoute($route, $httpMethod, $controller, $action) {
+    public function makeRoute($route, $httpMethod, $controllerClass, $action) {
         $router = $this;
 
-        $mappedRoute = $this->klein->respond($httpMethod, $route, function ($request, $response) use ($router, $controller, $action) {
+        $mappedRoute = $this->klein->respond($httpMethod, $route, function ($request, $response) use ($controllerClass, $action) {
+            $controller = $this->loadController($controllerClass);
             $controller->invokeWithRequest($action,$request, $response);
         });
 

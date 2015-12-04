@@ -173,7 +173,6 @@ class testRouter extends PHPUnit_Framework_TestCase {
         $this->assertEquals($response->status()->getCode(), 200);
     }
 
-
     /**
      * For collections
      *

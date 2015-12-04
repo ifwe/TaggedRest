@@ -1,4 +1,6 @@
 <?php
+namespace Tagged\Rest\Schema;
+use Tagged\Rest\Schema;
 
 class DateFormat extends Schema{
     function __construct(array $config){

@@ -1,25 +1,67 @@
 <?php
 namespace Tagged\Rest\Api;
 
+use Klein\Exceptions\DispatchHaltedException;
+
 class Base {
     private $inputSchemas = array();
     private $outputSchemas = array();
 
-    // Defines the mapping between HTTP methods
+    // Defines a custom mapping between HTTP methods
     // and the controller actions
     protected $resourceMapping = array(
-        'fetch' => 'GET',
-        'update' => 'PUT',
-        'delete' => 'DELETE',
     );
 
     protected $collectionMapping = array(
-        'find' => 'GET',
-        'index' => 'GET',
-        'create' => 'POST',
-        'bulkUpdate' => 'PUT',
-        'deleteAll' => 'DELETE',
     );
+
+    public function fetch(\stdClass $params) {
+        $class = get_class($this);
+        throw new \Exception("Method $class::fetch is undefined",400);
+    }
+
+    public function update(\stdClass $params) {
+        $class = get_class($this);
+        throw new \Exception("Method $class::update is undefined",400);
+    }
+
+    public function delete(\stdClass $params) {
+        $class = get_class($this);
+        throw new \Exception("Method $class::delete is undefined",400);
+    }
+
+    public function find(\stdClass $params) {
+        if ($this->respondsTo('index')) {
+            throw new DispatchHaltedException(null, DispatchHaltedException::SKIP_THIS);
+        } else {
+            $class = get_class($this);
+            throw new \Exception("Method $class::find is undefined",400);
+        }
+    }
+
+    public function create(\stdClass $params) {
+        $class = get_class($this);
+        throw new \Exception("Method $class::create is undefined",400);
+    }
+
+    public function bulkUpdate(\stdClass $params) {
+        $class = get_class($this);
+        throw new \Exception("Method $class::bulkUpdate is undefined",400);
+    }
+
+    public function deleteAll(\stdClass $params) {
+        $class = get_class($this);
+        throw new \Exception("Method $class::deleteAll is undefined",400);
+    }
+
+    public function index($params) {
+        if ($this->respondsTo('find')) {
+            throw new DispatchHaltedException(null, DispatchHaltedException::SKIP_THIS);
+        } else {
+            $class = get_class($this);
+            throw new \Exception("Method $class::index is undefined",400);
+        }
+    }
 
     /*
      * Get a web enabled version of the controller.
@@ -34,19 +76,30 @@ class Base {
      * like from code. Used when you want to hit the
      * api locally without an http request.
      */
-    public static function raw() {
-        return new RawWrapper(new static());
+    public static function raw(...$params) {
+        return new RawWrapper(new static(...$params));
     }
 
-    /*
+    /**
      * Register a schema for a method.
+     * @param string $method name of a handler method
+     * @param array $schema a php assoc array representing a json schema to pass as the constructor argument for a Tagged\Rest\Schema\Validator class
      */
     protected function _registerInputSchema($method, $schema) {
+        if (!isset($schema['type']) || $schema['type'] !== 'object') {
+            $type = isset($schema['type']) ? json_encode($schema['type']) : "null";
+            trigger_error("Invalid input schema for an HTTP request: " . $type, E_USER_NOTICE);
+            throw new InvalidArgumentException("Invalid input schema for an HTTP request: " . $type);
+        }
         $this->inputSchemas[$method] = new \Tagged\Rest\Schema\Validator($schema);
     }
 
     protected function _registerOutputSchema($method, $schema) {
         $this->ouputSchemas[$method] = new \Tagged\Rest\Schema\Validator($schema);
+    }
+
+    protected function _routeableMethods() {
+        return array_keys($this->inputSchemas);
     }
 
     /*
@@ -78,43 +131,7 @@ class Base {
      * they exist on the object.
      */
     public function respondsTo($method) {
-        $routableMethods = array_merge(
-            $this->getCollectionMethods(),
-            $this->getResourceMethods()
-        );
-        return in_array($method, $routableMethods);
-    }
-
-    /*
-     * Return the http action this method responds to
-     */
-    public function actionFor($method) {
-        $map = $this->methodMapping();
-        return $map[$method];
-    }
-
-    /*
-     * Get a full mapping of all methods and http actions
-     */
-    protected function methodMapping() {
-        return array_merge(
-            $this->resourceMapping,
-            $this->collectionMapping
-        );
-    }
-
-    public function getCollectionMethods() {
-        return array_intersect(
-            get_class_methods($this),
-            array_keys($this->collectionMapping)
-        );
-    }
-
-    public function getResourceMethods() {
-        return array_intersect(
-            get_class_methods($this),
-            array_keys($this->resourceMapping)
-        );
+        return in_array($method, $this->_routeableMethods());
     }
 
     public function inputSchemaFor($method) {
@@ -136,21 +153,42 @@ class Base {
      * Call this if you want to filter the input using the
      * schema registered for the method
      */
-    public function invoke($method, array $params) {
-        $params = $this->_validateInputFor($method, $params);
-
+    public function invoke($action, array $params) {
+        $params = $this->_validateInputFor($action, $params);
         $params = json_decode(json_encode($params));
-
-        return $this->$method($params);
+        return json_decode(json_encode($this->$action($params)));
     }
 
     public function invokeWithRequest($action, \Klein\Request $request, \Klein\Response $response) {
         $params = $request->params();
 
-        $result = $this->invoke($action,$params);
-        $result = $this->_formatResponse($action,$result, $request->format);
+        try{
+            $result = $this->invoke($action,$params);
+            $result = $this->_formatResponse($action,$result, $request->format);
+        } catch(\Exception $e) {
+            $result = $this->_formatResponse($action, array(
+                "error"=>array(
+                    "code"=>$e->getCode(),
+                    "message"=>$e->getMessage(),
+                    "trace"=>$e->getTrace()
+                )
+            ), $request->format);
+        }
 
+        // Using this instead of $response->json json expects an array, and some subclasses may have _formatResponse do something other than json_encode.
+        $response->header('Content-Type', $this->_getContentType($request->format));
         $response->body($result);
+    }
+
+    /**
+     * Gets the Content-Type to send to the requester.
+     * Override this in the subclass to have different Content-Types for an http request.
+     *
+     * @param $format string format requested by client (unused, use this the subclass)
+     * @return string value of Content-Type to send.
+     */
+    protected function _getContentType($format) {
+        return 'application/json; charset=UTF-8';
     }
 
     /*
@@ -168,6 +206,10 @@ class Base {
     }
 
     public function __call($action, $args) {
-        return $this->invoke($action, $request, $response);
+        if (method_exists($this, $action)) {
+            return $this->invoke($action, $args);
+        }
+
+        throw new \Exception("Method $action not declared for ".get_class($this));
     }
 }
